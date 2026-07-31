@@ -1,0 +1,109 @@
+# Camera/display synchronization and rolling shutter
+
+Research for Wayfinder ticket [#4](../wayfinding/tickets/camera-display-synchronization.md), scoped to a one-way screen-to-Android-camera Version 1. The browser is an ordinary sender: it cannot control panel scanout, exact refresh, or the receiver camera clock.
+
+## Decision summary
+
+Version 1 should use a **spatial frame code with persistent per-frame timing/tracking fields, transmitter frame IDs, and an outer erasure/repetition code**. The decoder should explicitly model rolling shutter and classify partial or mixed captures as useful data or erasures. It should not require a one-shot temporal preamble, a fixed sender/receiver frame-rate ratio, or a global clock.
+
+Recommended decisions:
+
+| Question | Version 1 decision | Rationale |
+| --- | --- | --- |
+| Temporal preamble | Use a short startup sentinel only as a convenience; make the real synchronization field repeat in every encoded frame. | Capture can begin at an arbitrary phase, and a preamble can be missed or mixed. Repeated fields permit lock and re-lock. LightSync uses per-line tracking plus frame fields rather than relying on a single synchronized start. ([Hu, Gu & Pu, 2013](https://doi.org/10.1145/2500423.2500437), pp. 16, 20–21.) |
+| Rolling-shutter-aware decoding | Required. Estimate the row-wise mixture/state boundary and decode rows or bands independently. | A rolling shutter samples different rows at different times; temporal display changes therefore become spatial patterns, and a captured image may contain parts of multiple display frames. ([Danakis et al., 2012](https://doi.org/10.1109/GLOCOMW.2012.6477759); [Jo, Gupta & Nayar, 2016](https://doi.org/10.1145/2896818).) |
+| Frame IDs | Required. Carry a bounded transmitter sequence index, coding generation/index, and generation length in every frame, protected by the frame CRC. | A camera frame number is local to the Android camera. Embedded IDs distinguish duplicates, infer missing frames, and identify which coded payload belongs to which generation. LightSync uses sequence length and sent-frame indices for exactly this purpose. ([Hu, Gu & Pu, 2013](https://doi.org/10.1145/2500423.2500437), pp. 20–21.) |
+| Sender cadence | Default to a conservative logical cadence of about 10–15 encoded frames/s, with each logical frame held for multiple browser display refreshes. Offer a measured fast profile later; do not make 30/s a V1 interoperability requirement. | `requestAnimationFrame()` is a one-shot scheduling request whose rate is selected by the user agent and may be throttled when hidden; it is not a programmable display clock. ([WHATWG HTML, animation frames](https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html); [W3C timing control](https://www.w3.org/TR/animation-timing/).) LightSync’s tested design requires receiver rate at least half the transmit rate, while its tested phones ranged from 8–30 fps. ([Hu, Gu & Pu, 2013](https://doi.org/10.1145/2500423.2500437), pp. 15–16.) |
+| Exposure/flicker | Prefer a stable display baseline and balanced spatial changes. On capable Android devices, lock or manually bound exposure after convergence; otherwise use measured metadata and treat long/mixed exposures as erasures. Do not intentionally rely on a low-frequency full-screen flicker pattern. | Android AE can override application exposure/frame-duration requests; exposure time and rolling-shutter skew directly determine temporal integration. ([Android `CameraMetadata`](https://developer.android.com/reference/android/hardware/camera2/CameraMetadata); [Android `CaptureRequest`](https://developer.android.com/reference/android/hardware/camera2/CaptureRequest).) IEEE 1789 addresses LED-current modulation and health risk, not browser pixel updates, so it is a cautionary reference rather than a protocol timing guarantee. ([IEEE 1789-2015](https://standards.ieee.org/ieee/1789/4479/).) |
+| Drops/duplicates | Do not count camera buffers as protocol progress. Deduplicate by transmitter frame/generation ID; infer gaps as erasures; use capture timestamp/frame number only for diagnostics and cadence estimation. | Android queues can explicitly drop older images (`acquireLatestImage()`), and Camera2 frame numbers/timestamps describe the local capture pipeline. ([Android `ImageReader`](https://developer.android.com/reference/android/media/ImageReader); [Android `CaptureResult`](https://developer.android.com/reference/android/hardware/camera2/CaptureResult).) |
+| Adaptive cadence | V1 adaptation is receiver-side decoding plus sender-side observation of actual browser cadence. Sender rate changes based on receiver feedback are optional future work because the baseline link is one-way. | Asynchronous rolling-shutter OCC can estimate symbol timing from received cycles without a shared clock, but exact high-rate operation depends on sensor line timing and is not a browser guarantee. ([Ohshima et al., 2019](https://doi.org/10.1587/comex.2018XBL0141).) |
+
+## What the channel actually does
+
+There are at least three clocks: browser presentation, display scanout/refresh, and camera exposure/readout. They have unrelated phase and may have changing rates. A browser callback means “update before a repaint,” not “the panel has displayed this exact state for a known duration.” The HTML standard schedules callbacks, while the W3C timing specification explicitly lets the user agent choose an animation rate; browser documentation also records that callbacks are generally aligned to refresh but are paused or throttled for hidden pages. The sender must therefore timestamp its own logical states and hold them for a measured number of actual callbacks, not assume that callback count equals camera samples. ([WHATWG HTML](https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html), [W3C timing control](https://www.w3.org/TR/animation-timing/), [MDN `requestAnimationFrame()`](https://developer.mozilla.org/en-US/docs/Web/API/Window/requestAnimationFrame).)
+
+A rolling-shutter camera does not expose all rows simultaneously. The Android camera model exposes `SENSOR_TIMESTAMP` as the start of exposure for the first active-array row and defines `SENSOR_ROLLING_SHUTTER_SKEW` as the time between the first-row and one-past-last-row exposure starts. `SENSOR_EXPOSURE_TIME` is the duration each pixel integrates light, while `SENSOR_FRAME_DURATION` is the interval between sensor readouts. Those quantities are more useful to the decoder than a nominal “30 fps” label. ([Android `CaptureResult`](https://developer.android.com/reference/android/hardware/camera2/CaptureResult), especially `SENSOR_TIMESTAMP`, `SENSOR_EXPOSURE_TIME`, `SENSOR_FRAME_DURATION`, and `SENSOR_ROLLING_SHUTTER_SKEW`.)
+
+The optical consequence is a time-to-space transform. Danakis et al. demonstrate that an on/off optical signal appears as light/dark bands in an image and that rolling-shutter sampling allows a data rate much higher than camera frame rate. DisCo gives the more general image model: the captured image factors into the displayed texture multiplied by a row-varying signal image; each row samples the temporal signal at a different instant. This is useful for a future high-rate subcarrier, but it also means that a long exposure or a display transition during readout creates a mixed/blurred row rather than a clean frame. ([Danakis et al., 2012](https://doi.org/10.1109/GLOCOMW.2012.6477759); [DisCo PDF and DOI](https://cave.cs.columbia.edu/old/publications/pdfs/Jo_TOG16.pdf), [DOI](https://doi.org/10.1145/2896818).)
+
+Unsynchronized frame playback adds a second failure mode: a camera image can contain a clean display frame, a mixture of two frames, or a mixture of three frames with row-dependent boundaries. LightSync reports frame-rate variability from 8 to 30 fps on four smartphone cameras, observed both lost original frames and mixed frames, and showed that simply reducing the display rate to half the camera rate wastes capacity. Its solution is directly relevant to Version 1: per-line tracking to identify components of mixed frames, plus linear erasure coding across frames to recover missing or ambiguous content. ([LightSync](https://doi.org/10.1145/2500423.2500437), abstract and pp. 16–21.)
+
+## Version 1 frame and timing structure
+
+Each logical encoded frame should contain, in a stable ROI and in the same orientation as the payload:
+
+1. **Geometric locator/border.** This is the spatial lock and lets the receiver reject frames where the display is not sufficiently visible. It is not a clock.
+2. **Persistent rolling-shutter tracking field.** Use high-contrast bars or a small repeated training pattern arranged along the rolling direction. The field must be present in every frame and change according to a known short cycle. The decoder samples it by row/band to estimate which transmitted state contributed to each region. LightSync places tracking bars perpendicular to the scanning direction and separates them from frame-tracking fields; its bars also help distinguish mixed grayscale combinations. ([LightSync](https://doi.org/10.1145/2500423.2500437), pp. 19–21.)
+3. **Protocol header.** Include protocol version, transfer/generation identifier, transmitter frame index, coding-generation index, generation length, and a small cadence/profile indicator. The exact bit widths should be selected with the symbol-alphabet ticket; the semantic fields are required now. Keep the index modulo a power of two, but require enough width that a receiver cannot confuse two live frames in the capture window.
+4. **Payload and integrity check.** Include a per-frame CRC or equivalent integrity check. A row or block that fails the check becomes an erasure; it must not poison the generation decoder.
+5. **Balanced guard/background.** Avoid making the whole display alternate black/white. Maintain a nonzero baseline and balance bright/dark area over a short cycle. DisCo’s model assumes a nonzero displayed texture and treats the temporal signal as a multiplicative layer; a perfectly black display region is unreliable for that approach. ([DisCo](https://doi.org/10.1145/2896818), p. 5.)
+
+A separate startup sentinel may be shown for a few logical frames to help the camera find the ROI, but it is not the protocol’s only synchronization mechanism. The sender should loop the complete coded sequence, including the persistent tracking/header fields. This makes a capture that starts late, begins between frames, or resumes after a hidden-tab pause recoverable without a shared start time. The receiver should accept a frame only after its locator and tracking field agree; otherwise it waits for the next repeated frame.
+
+The outer code should be generation-based. A practical baseline is to repeat or parity-protect a small group of logical frames, carry each coded frame’s component indices, and stop after enough independent frames have arrived. LightSync used three-frame XOR groups and an explicit coded-sequence length as a low-complexity design, while noting that stronger codes are possible. The general rule matters more than that exact code: a duplicate adds no rank, a missing ID is an erasure, and a mixed frame can contribute only the rows/blocks that have a valid component interpretation. ([LightSync](https://doi.org/10.1145/2500423.2500437), pp. 20–21.)
+
+## Cadence and exposure policy
+
+### Browser sender
+
+Use `requestAnimationFrame()` to commit a logical frame and use the callback timestamp to maintain a time-based hold interval. Do not use `setInterval()` as the display clock. If the measured callback interval is late, keep the current logical frame until the next valid commit; never advance several protocol frames merely because the JavaScript thread woke late. A visible-page requirement and a screen wake lock are appropriate operational safeguards: Page Visibility defines background/minimized pages as hidden, and the Screen Wake Lock API only permits visible documents to acquire a screen wake lock. ([Page Visibility](https://www.w3.org/TR/page-visibility-2/); [Screen Wake Lock](https://www.w3.org/TR/screen-wake-lock/).)
+
+For an unknown Android camera, start with a logical cadence around 10–15 frames/s. On a 60 Hz panel this means holding each state for roughly 4–6 refresh opportunities; on another panel, the implementation should choose the nearest cadence it can actually sustain. This is an engineering starting profile, not a display standard. It keeps the LightSync condition (`receive rate >= half transmit rate`) plausible for cameras near 8–15 fps while still allowing the camera to observe repeated states. A fast profile can target 20–30 logical frames/s only after physical-device measurements show adequate capture rate, exposure, and decode goodput. ([LightSync](https://doi.org/10.1145/2500423.2500437).)
+
+Do not promise that the browser can generate DisCo-style hundreds-of-Hz or kilohertz modulation by repainting DOM/canvas pixels. DisCo’s high-frequency signal is a display/backlight modulation layer sampled by the rolling shutter; ordinary browser rendering is not a backlight-control API. A V1 browser implementation should use spatial payloads plus frame-to-frame changes, reserving a true high-frequency rolling-shutter subcarrier for hardware or compositor-specific experiments. ([DisCo](https://doi.org/10.1145/2896818); [WHATWG HTML animation frames](https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html).)
+
+### Android receiver
+
+The receiver should record, where available, `CaptureResult.SENSOR_TIMESTAMP`, `getFrameNumber()`, `SENSOR_EXPOSURE_TIME`, `SENSOR_FRAME_DURATION`, and `SENSOR_ROLLING_SHUTTER_SKEW`. The protocol decoder uses the embedded transmitter ID; these Camera2 values provide timing, local-drop, and quality diagnostics. Android defines frame numbers as monotonically increasing for captures of the same type over a camera-device lifetime, but they are not sender frame IDs and have no meaning across sessions or devices. ([Android `CaptureResult`](https://developer.android.com/reference/android/hardware/camera2/CaptureResult).)
+
+If the device supports manual sensor control, the app may lock exposure after auto-exposure converges, or request a bounded exposure/frame duration. Android documents that `CONTROL_AE_MODE_OFF` makes the application-selected exposure, sensitivity, and frame duration effective; with AE enabled, those values are overridden by the auto-exposure algorithm. If manual control is unavailable, leave the camera in a compatible auto mode and decode conservatively from the actual results. ([Android `CameraMetadata`](https://developer.android.com/reference/android/hardware/camera2/CameraMetadata), `CONTROL_AE_MODE_OFF` and `CONTROL_AE_MODE_ON`; [Android `CaptureRequest`](https://developer.android.com/reference/android/hardware/camera2/CaptureRequest), `SENSOR_EXPOSURE_TIME` and `SENSOR_FRAME_DURATION`.)
+
+The decoder should use `SENSOR_ROLLING_SHUTTER_SKEW` and the tracking field to estimate a per-row phase, but it should not require the field to be calibrated to a specific sensor model. A useful frame can have several valid row bands even when the complete image CRC fails. Long exposures, saturation, severe motion, and rows outside the display ROI should be marked as erasures rather than interpreted as a new symbol.
+
+Avoid intentional modulation close to mains flicker frequencies or large full-screen luminance toggles. Android exposes scene-flicker and anti-banding behavior because exposure choices can create banding; if manual exposure is used, the application assumes responsibility for choosing an exposure that does not create banding. IEEE 1789 is relevant as a human-factors warning about modulated LED light, but its scope is high-brightness LED current modulation, not arbitrary LCD/OLED browser pixels. V1 should therefore measure perceptual flicker and decode reliability on real panels, not claim compliance merely from choosing a numeric refresh rate. ([Android `CaptureResult`](https://developer.android.com/reference/android/hardware/camera2/CaptureResult), anti-banding and scene-flicker sections; [IEEE 1789-2015](https://standards.ieee.org/ieee/1789/4479/).)
+
+## Drops, duplicates, and unsynchronized links
+
+There are several distinct “drop” events and the protocol should report them separately:
+
+- **Display-side missed deadline:** the browser callback or compositor did not update the intended state on time. The sender should record the late interval and let a later observed transmitter ID or repetition reveal whether the camera missed a state; browser code must not assume that a callback confirms physical panel scanout.
+- **Camera sampling gap:** no image was delivered for an interval. Camera timestamps and local frame-number gaps diagnose it; the outer code recovers it.
+- **Image-queue drop:** Android’s `ImageReader.acquireLatestImage()` deliberately closes older queued images, while `acquireNextImage()` can create increasing latency and eventually stall if images are not closed promptly. The capture pipeline must choose deliberately between low latency and retaining every sample, and must log the choice. ([Android `ImageReader`](https://developer.android.com/reference/android/media/ImageReader).)
+- **Duplicate capture:** the same transmitter frame ID was seen again, either because the state was held/repeated or because the camera delivered a duplicate. It is useful only as another observation of the same codeword; it must not advance generation state.
+- **Mixed rolling-shutter capture:** different rows belong to different transmitter IDs. The tracking field identifies the row-to-ID mapping; valid rows can be kept, invalid rows become erasures.
+
+This distinction is why a protocol-level frame ID is more important than a nominal cadence. A receiver can reconstruct ordering from IDs even if camera buffers arrive late or out of order, and can estimate whether it is seeing a repeated state, a missing state, or a mixed state. A frame ID should never be inferred from image arrival order alone.
+
+## What is deliberately deferred
+
+Version 1 should defer these stronger mechanisms:
+
+- hardware-synchronized display/camera clocks or a browser API assumption that provides them;
+- a DisCo-style hidden backlight subcarrier requiring compositor/display hardware control;
+- exact sensor line-period calibration as a prerequisite for decoding;
+- a feedback-controlled sender cadence, unless a later transport adds an explicit return channel;
+- a human-safety claim based solely on IEEE 1789 thresholds.
+
+The asynchronous OCC literature shows that more ambitious rolling-shutter timing is possible: Ohshima et al. estimate a variable symbol rate from the receiver’s cycle pattern and report error-free 4–14 ksymbol/s experiments on Android smartphones with 30-fps image sensors. That is evidence for a future high-rate mode, not a reason to make Version 1 depend on exact symbol/line timing or hidden flicker. ([Ohshima et al., 2019](https://doi.org/10.1587/comex.2018XBL0141).)
+
+## Validation gates for Version 1
+
+Before freezing the cadence constants or header widths, measure at least:
+
+1. actual browser commit intervals and missed commits at 60/90/120 Hz, foreground and after visibility changes;
+2. Android capture timestamps, frame-number gaps, exposure time, frame duration, and rolling-shutter skew on each supported camera mode;
+3. clean, duplicated, dropped, two-frame-mixed, and three-frame-mixed captures;
+4. goodput and generation-recovery rate versus logical cadence, exposure mode, display brightness, distance, angle, motion, and partial obstruction;
+5. human-visible flicker/judder for the balanced frame cycle on representative LCD and OLED panels.
+
+The pass condition should be stated as verified goodput and complete SHA-256 recovery under a named device matrix, not as “synchronized” or “30 fps.”
+
+## Sources
+
+- Hu, Gu & Pu, “LightSync: Unsynchronized Visual Communication over Screen-Camera Links,” ACM MobiCom 2013. [DOI](https://doi.org/10.1145/2500423.2500437); [author-accessible PDF](https://picture.iczhiku.com/resource/paper/wHkETZwequTUeMvn.pdf).
+- Jo, Gupta & Nayar, “DisCo: Display-Camera Communication Using Rolling Shutter Sensors,” ACM Transactions on Graphics 35(5), 2016. [DOI](https://doi.org/10.1145/2896818); [paper PDF](https://cave.cs.columbia.edu/old/publications/pdfs/Jo_TOG16.pdf).
+- Danakis et al., “Using a CMOS Camera Sensor for Visible Light Communication,” IEEE Globecom Workshops 2012. [DOI](https://doi.org/10.1109/GLOCOMW.2012.6477759).
+- Ohshima et al., “Rolling-shutter-based asynchronous optical camera communication by a cycle pattern of received symbols using smartphones,” IEICE Communications Express 8(3), 2019. [DOI](https://doi.org/10.1587/comex.2018XBL0141); [J-STAGE full text](https://www.jstage.jst.go.jp/article/comex/8/3/8_2018XBL0141/_article/-char/en).
+- WHATWG, [HTML animation frame callbacks](https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html); W3C, [Timing control for script-based animations](https://www.w3.org/TR/animation-timing/), [Page Visibility Level 2](https://www.w3.org/TR/page-visibility-2/), and [Screen Wake Lock](https://www.w3.org/TR/screen-wake-lock/).
+- Android Developers, [CameraMetadata](https://developer.android.com/reference/android/hardware/camera2/CameraMetadata), [CaptureRequest](https://developer.android.com/reference/android/hardware/camera2/CaptureRequest), [CaptureResult](https://developer.android.com/reference/android/hardware/camera2/CaptureResult), and [ImageReader](https://developer.android.com/reference/android/media/ImageReader).
+- IEEE Standards Association, [IEEE 1789-2015](https://standards.ieee.org/ieee/1789/4479/), “Recommended Practices for Modulating Current in High-Brightness LEDs for Mitigating Health Risks to Viewers.”

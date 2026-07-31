@@ -1,0 +1,13 @@
+{
+  "name": "camsend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Offline optical screen-to-camera file transfer",
+  "scripts": {
+    "test": "node --test",
+    "benchmark": "node simulator/benchmark.mjs",
+    "serve": "node tools/serve.mjs",
+    "build:web": "node tools/build-web.mjs"
+  }
+}

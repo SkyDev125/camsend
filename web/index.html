@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#08111f" />
+    <meta name="description" content="Offline screen-to-camera file transfer" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+    <title>Camsend</title>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">OFFLINE OPTICAL TRANSFER</p>
+          <h1>Camsend</h1>
+          <p class="lede">Move a file through light: one screen, one camera, no network.</p>
+        </div>
+        <span id="connection-badge" class="badge">local-only</span>
+      </header>
+
+      <nav class="tabs" aria-label="Transfer mode">
+        <button class="tab active" data-mode="send">Send</button>
+        <button class="tab" data-mode="receive">Receive</button>
+      </nav>
+
+      <section id="send-panel" class="panel active-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">SCREEN → CAMERA</p><h2>Send a file</h2></div>
+          <span id="sender-state" class="status-dot">ready</span>
+        </div>
+        <label class="file-drop" for="file-input">
+          <input id="file-input" type="file" />
+          <span class="drop-icon">＋</span>
+          <span><strong id="file-label">Choose a local file</strong><small id="file-meta">Nothing leaves this device.</small></span>
+        </label>
+        <div class="controls-grid">
+          <label>Optical profile<select id="send-profile"><option value="robust">Robust · 2-bit calibrated</option><option value="dense">Dense · 4-bit calibrated</option></select></label>
+          <label>Frame cadence<select id="send-cadence"><option value="24">24 fps</option><option value="30" selected>30 fps</option><option value="45">45 fps</option></select></label>
+        </div>
+        <button id="send-start" class="primary" disabled>Prepare transfer</button>
+        <div id="send-metrics" class="metrics hidden"></div>
+        <div id="send-stage" class="optical-stage hidden"><canvas id="send-canvas"></canvas><button id="send-stop" class="stage-action">Stop and exit full screen</button></div>
+      </section>
+
+      <section id="receive-panel" class="panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">CAMERA → FILE</p><h2>Receive a file</h2></div>
+          <span id="receiver-state" class="status-dot">camera idle</span>
+        </div>
+        <div class="controls-grid">
+          <label>Optical profile<select id="receive-profile"><option value="robust">Robust · 2-bit calibrated</option><option value="dense">Dense · 4-bit calibrated</option></select></label>
+          <label>Camera<select id="camera-select"><option value="">Choose after camera permission</option></select></label>
+        </div>
+        <div class="camera-stage"><video id="camera-video" playsinline muted></video><canvas id="camera-canvas" class="hidden"></canvas><div id="camera-guide" class="camera-guide"><span>Start the camera, then fill the guide with the sender screen.</span></div></div>
+        <div class="button-row"><button id="camera-start" class="primary">Start camera</button><button id="camera-stop" class="secondary" disabled>Stop camera</button></div>
+        <div id="receive-metrics" class="metrics hidden"></div>
+        <a id="download-file" class="primary hidden" download>Download verified file</a>
+      </section>
+
+      <section class="diagnostics panel">
+        <div class="panel-heading compact"><div><p class="eyebrow">OBSERVABILITY</p><h2>Live diagnostics</h2></div><button id="export-diagnostics" class="text-button">Export JSON</button></div>
+        <div id="diagnostic-grid" class="diagnostic-grid"><span>Markers</span><strong id="diag-markers">—</strong><span>Calibration slope</span><strong id="diag-calibration">—</strong><span>Cell confidence</span><strong id="diag-confidence">—</strong><span>Frame rejection</span><strong id="diag-rejection">—</strong><span>Fountain rank</span><strong id="diag-rank">—</strong><span>Verified goodput</span><strong id="diag-goodput">—</strong></div>
+        <p class="privacy-note">Diagnostic exports contain device and decoder statistics, never file contents, unless you explicitly enable a recording in a future build.</p>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "generatedAt": "2026-07-31",
+  "environment": "Node.js deterministic simulator; geometry-neutral clean baseline",
+  "frameRate": 30,
+  "cases": [
+    {
+      "profile": "robust",
+      "seeds": [11, 29],
+      "bytes": 8000,
+      "verified": true,
+      "rawOpticalBitrate": 423360,
+      "verifiedGoodputBytesPerSecondRange": [11329.95, 17984.85],
+      "recoveredPayloadBytesPerSecondRange": [214634.59, 248622.59]
+    },
+    {
+      "profile": "dense",
+      "seeds": [11, 29],
+      "bytes": 8000,
+      "verified": true,
+      "rawOpticalBitrate": 1399680,
+      "verifiedGoodputBytesPerSecondRange": [31290.08, 35085.52],
+      "recoveredPayloadBytesPerSecondRange": [384492.48, 431130.85]
+    }
+  ],
+  "caveat": "Perspective and motion cases are implemented by simulator/optical-sim.mjs but are not represented by this clean baseline; they remain the next decoder-hardening gate."
+}

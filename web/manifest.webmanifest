@@ -1,0 +1,10 @@
+{
+  "name": "Camsend Offline Optical Transfer",
+  "short_name": "Camsend",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#050b14",
+  "theme_color": "#08111f",
+  "description": "Transfer files locally through a screen and camera.",
+  "icons": []
+}
