@@ -26,6 +26,10 @@ The Decimen comparison exposed the original dense path as noncompetitive. The ac
 - [Shared web/Android implementation boundary](https://github.com/SkyDev125/camsend/issues/8) — language-neutral frame grammar with golden vectors, browser reference path and native Android adapter.
 - [Tracking, perspective, and calibration](https://github.com/SkyDev125/camsend/issues/9) — coloured marker centroids plus projective homography, persistent tracking and per-frame luminance calibration.
 
+### Implementation follow-up
+
+- [Optical impairment fixtures and rejection diagnostics](https://github.com/SkyDev125/camsend/issues/17) - seeded hardening cases for blur, exposure, quantization, glare, rolling shutter, obstruction, frame loss, and machine-readable rejection evidence.
+
 ## Open decision tickets
 
 <!-- The research frontier is clear enough for implementation. New tickets will be added only for implementation decisions that emerge from benchmarks. -->

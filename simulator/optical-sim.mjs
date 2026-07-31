@@ -143,12 +143,12 @@ export const decodeSimulatedFrame = (frame, profile) => {
   const optical = decodeOpticalFrame(frame.rgba, frame.width, frame.height, profile);
   if (!optical.ok) return optical;
   const packet = decodePacket(optical.encodedPacket);
-  return packet.ok ? { ok: true, packet, encodedPacket: optical.encodedPacket, erasures: optical.erasures, diagnostics: optical.diagnostics } : { ok: false, reason: `packet-${packet.reason}`, diagnostics: { ...optical.diagnostics, corrected: packet.corrected, erasures: optical.erasures?.length ?? 0 } };
+  return packet.ok ? { ok: true, packet, encodedPacket: optical.encodedPacket, erasures: optical.erasures ?? [], diagnostics: optical.diagnostics } : { ok: false, reason: `packet-${packet.reason}`, diagnostics: { ...optical.diagnostics, corrected: packet.corrected, erasures: optical.erasures?.length ?? 0 } };
 };
 
 export const decodeGlyphSimulatedFrame = (frame, { innerFec = false, profile = "glyph6" } = {}) => {
   const optical = decodeGlyphFrame(frame.rgba, frame.width, frame.height, profile);
   if (!optical.ok) return optical;
   const packet = decodePacket(optical.encodedPacket, { innerFec, erasures: optical.erasures });
-  return packet.ok ? { ok: true, packet, encodedPacket: optical.encodedPacket, diagnostics: optical.diagnostics } : { ok: false, reason: `packet-${packet.reason}`, diagnostics: { ...optical.diagnostics, corrected: packet.corrected } };
+  return packet.ok ? { ok: true, packet, encodedPacket: optical.encodedPacket, erasures: optical.erasures ?? [], diagnostics: optical.diagnostics } : { ok: false, reason: `packet-${packet.reason}`, diagnostics: { ...optical.diagnostics, corrected: packet.corrected, erasures: optical.erasures?.length ?? 0 } };
 };
