@@ -13,6 +13,10 @@ Reach a build-ready, research-backed Version 1 specification and a working inter
 
 ## Decisions so far
 
+### Performance amendment
+
+The Decimen comparison exposed the original dense path as noncompetitive. The active high-speed candidates are `glyph4` (112 × 63, minimum-distance-8, larger optical cells) and `glyph6` (144 × 81, 6 bits/cell, stationary), both using algebraic RS(255,239), confidence-derived erasures, phase search, and the shared fountain verifier. Glyph6 measures 136,364 verified bytes/s at 30 nominal fps and 272,727 bytes/s at 60 nominal fps in the clean deterministic fixture; glyph4 completes the mild geometry/noise fixture with zero rejected frames. Physical reliability is unresolved.
+
 - [Optical modulation and symbol alphabet](https://github.com/SkyDev125/camsend/issues/2) — visible calibrated grayscale tiles; robust 2-bit mode and measured 4-bit dense mode, with saturated colour reserved for fiducials.
 - [Colour, blur, glare, and hardware impairment model](https://github.com/SkyDev125/camsend/issues/3) — seeded simulation covers geometry, blur, exposure/colour, noise, rolling shutter, frame loss/duplicates and obstruction; retain only measured gains.
 - [Inner and cross-frame error correction](https://github.com/SkyDev125/camsend/issues/4) — Hamming(8,4) plus CRC-32 per packet and deterministic sparse-XOR fountain recovery across unordered frames.
@@ -28,7 +32,7 @@ Reach a build-ready, research-backed Version 1 specification and a working inter
 
 ## Not yet specified
 
-- Whether adaptive multi-region modulation or a full RaptorQ implementation beats the V1 baseline in the benchmark matrix.
+- Whether adaptive multi-region modulation, stronger soft glyph decoding, or a full RaptorQ implementation beats the measured glyph profiles in the benchmark matrix.
 - Which native acceleration paths are available on the build/test machine and which remain optional.
 - Physical-device tuning, because no camera/display lab hardware is available in the VM.
 

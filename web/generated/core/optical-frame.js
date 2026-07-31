@@ -2,10 +2,12 @@ import { clamp } from "./math.js";
 
 export const PROFILES = Object.freeze({
   robust: Object.freeze({ name: "robust", cols: 112, rows: 63, bitsPerCell: 2, levels: 4, blockSize: 512 }),
-  dense: Object.freeze({ name: "dense", cols: 144, rows: 81, bitsPerCell: 4, levels: 16, blockSize: 1536 })
+  dense: Object.freeze({ name: "dense", cols: 144, rows: 81, bitsPerCell: 4, levels: 16, blockSize: 1536 }),
+  glyph4: Object.freeze({ name: "glyph4", cols: 112, rows: 63, bitsPerCell: 4, levels: 2, blockSize: 2600, innerFec: Object.freeze({ type: "rs", parityBytes: 16 }) }),
+  glyph6: Object.freeze({ name: "glyph6", cols: 144, rows: 81, bitsPerCell: 6, levels: 2, blockSize: 7400, innerFec: Object.freeze({ type: "rs", parityBytes: 16 }) })
 });
 
-const MARKER_SIZE = 7;
+export const MARKER_SIZE = 7;
 const MARKERS = Object.freeze([
   { name: "top-left", rgb: [255, 31, 110], x: 2, y: 2 },
   { name: "top-right", rgb: [0, 214, 143], x: -1, y: 2 },
@@ -16,7 +18,7 @@ const MARKERS = Object.freeze([
 const getProfile = (profile) => typeof profile === "string" ? PROFILES[profile] : profile;
 const key = (x, y) => `${x}:${y}`;
 
-const markerLayout = (profile) => MARKERS.map((marker) => ({
+export const markerLayout = (profile) => MARKERS.map((marker) => ({
   ...marker,
   cellX: marker.x < 0 ? profile.cols + marker.x - MARKER_SIZE + 1 : marker.x,
   cellY: marker.y < 0 ? profile.rows + marker.y - MARKER_SIZE + 1 : marker.y
@@ -42,7 +44,7 @@ export const layoutFor = (profileInput) => {
   return { profile, markers: markerLayout(profile), calibration, data, capacityBytes: Math.floor((data.length * profile.bitsPerCell) / 8) };
 };
 
-const drawCell = (rgba, width, height, profile, cell, color) => {
+export const drawCell = (rgba, width, height, profile, cell, color) => {
   const x0 = Math.floor((cell.x * width) / profile.cols) + 1;
   const y0 = Math.floor((cell.y * height) / profile.rows) + 1;
   const x1 = Math.ceil(((cell.x + 1) * width) / profile.cols) - 1;
@@ -55,7 +57,7 @@ const drawCell = (rgba, width, height, profile, cell, color) => {
   }
 };
 
-const drawBlock = (rgba, width, height, profile, x, y, cellWidth, cellHeight, color) => {
+export const drawBlock = (rgba, width, height, profile, x, y, cellWidth, cellHeight, color) => {
   const x0 = Math.floor((x * width) / profile.cols) + 1;
   const y0 = Math.floor((y * height) / profile.rows) + 1;
   const x1 = Math.ceil(((x + cellWidth) * width) / profile.cols) - 1;
@@ -91,7 +93,7 @@ export const renderOpticalFrame = (encodedPacket, profileInput = "robust", { wid
   return { rgba, width: frameWidth, height: frameHeight, profile, layout };
 };
 
-const solveHomography = (source, destination) => {
+export const solveHomography = (source, destination) => {
   const matrix = [];
   for (let i = 0; i < source.length; i++) {
     const [u, v] = source[i];
@@ -115,14 +117,14 @@ const solveHomography = (source, destination) => {
   return matrix.map((row) => row[8]).concat(1);
 };
 
-const project = (homography, u, v) => {
+export const project = (homography, u, v) => {
   const denominator = homography[6] * u + homography[7] * v + homography[8];
   return [(homography[0] * u + homography[1] * v + homography[2]) / denominator, (homography[3] * u + homography[4] * v + homography[5]) / denominator];
 };
 
 const luma = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
 
-const samplePatch = (rgba, width, height, x, y, radius) => {
+export const samplePatch = (rgba, width, height, x, y, radius) => {
   let sum = 0; let count = 0;
   const cx = Math.round(x); const cy = Math.round(y);
   for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
@@ -140,23 +142,37 @@ const markerDistance = (rgba, width, x, y, rgb) => {
   return Math.sqrt(dr * dr + dg * dg + db * db);
 };
 
-const detectMarkers = (rgba, width, height, layout) => {
-  const step = Math.max(1, Math.floor(Math.min(width, height) / 500));
-  const sums = layout.markers.map(() => ({ x: 0, y: 0, count: 0, minX: width, minY: height, maxX: 0, maxY: 0 }));
-  for (let y = 0; y < height; y += step) for (let x = 0; x < width; x += step) {
-    const offset = (y * width + x) * 4;
-    const r = rgba[offset]; const g = rgba[offset + 1]; const b = rgba[offset + 2];
-    if (Math.max(r, g, b) - Math.min(r, g, b) < 70) continue;
-    let best = 0; let bestDistance = Number.POSITIVE_INFINITY;
-    for (let index = 0; index < layout.markers.length; index++) {
-      const marker = layout.markers[index]; const distance = Math.sqrt((r - marker.rgb[0]) ** 2 + (g - marker.rgb[1]) ** 2 + (b - marker.rgb[2]) ** 2);
-      if (distance < bestDistance) { bestDistance = distance; best = index; }
+export const detectMarkers = (rgba, width, height, layout) => {
+  const scan = (windows, step) => layout.markers.map((marker, index) => {
+    const window = windows[index]; const sums = { x: 0, y: 0, count: 0 };
+    const target = marker.rgb; const maxDistanceSquared = 220 * 220;
+    for (let y = window.y0; y < window.y1; y += step) for (let x = window.x0; x < window.x1; x += step) {
+      const offset = (y * width + x) * 4;
+      const r = rgba[offset]; const g = rgba[offset + 1]; const b = rgba[offset + 2];
+      if (Math.max(r, g, b) - Math.min(r, g, b) < 70) continue;
+      const dr = r - target[0]; const dg = g - target[1]; const db = b - target[2];
+      const distanceSquared = dr * dr + dg * dg + db * db;
+      if (distanceSquared > maxDistanceSquared) continue;
+      const weight = 1 - Math.sqrt(distanceSquared) / 220;
+      sums.x += x * weight; sums.y += y * weight; sums.count += weight;
     }
-    if (bestDistance > 220) continue;
-    const weight = 1 - bestDistance / 220;
-    const found = sums[best]; found.x += x * weight; found.y += y * weight; found.count += weight; found.minX = Math.min(found.minX, x); found.minY = Math.min(found.minY, y); found.maxX = Math.max(found.maxX, x); found.maxY = Math.max(found.maxY, y);
-  }
-  return sums.map((found, index) => found.count < 8 ? null : { x: found.x / found.count, y: found.y / found.count, count: found.count, marker: layout.markers[index] });
+    return sums.count < 8 ? null : { x: sums.x / sums.count, y: sums.y / sums.count, count: sums.count, marker };
+  });
+  const localWindows = layout.markers.map((marker) => {
+    const cx = ((marker.cellX + MARKER_SIZE / 2) / layout.profile.cols) * width;
+    const cy = ((marker.cellY + MARKER_SIZE / 2) / layout.profile.rows) * height;
+    const halfWidth = width * 0.16; const halfHeight = height * 0.16;
+    return { x0: Math.max(0, Math.floor(cx - halfWidth)), x1: Math.min(width, Math.ceil(cx + halfWidth)), y0: Math.max(0, Math.floor(cy - halfHeight)), y1: Math.min(height, Math.ceil(cy + halfHeight)) };
+  });
+  // Use every pixel in the small windows so the corner estimate retains
+  // sub-cell precision; glyph cells are narrow enough that a one-pixel
+  // homography bias can flip an otherwise clean 4x4 symbol.
+  const local = scan(localWindows, 1);
+  if (local.every(Boolean)) return local;
+  // Fallback retains lock-on for a cropped or strongly rotated sender while
+  // normal frames use only four small corner windows.
+  const full = { x0: 0, x1: width, y0: 0, y1: height };
+  return scan(layout.markers.map(() => full), Math.max(2, Math.floor(Math.min(width, height) / 800)));
 };
 
 export const decodeOpticalFrame = (rgba, width, height, profileInput = "robust") => {

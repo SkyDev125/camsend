@@ -5,10 +5,11 @@ import { sha256Hex } from "./bytes.js";
 const randomSession = () => (globalThis.crypto?.getRandomValues ? globalThis.crypto.getRandomValues(new Uint32Array(1))[0] : Math.floor(Math.random() * 0xffffffff)) >>> 0;
 
 export class FileSender {
-  constructor(bytes, fileName, { blockSize = 512, session = randomSession(), flags = 0 } = {}) {
+  constructor(bytes, fileName, { blockSize = 512, session = randomSession(), flags = 0, innerFec = true } = {}) {
     this.bytes = bytes;
     this.fileName = fileName;
     this.flags = flags;
+    this.innerFec = innerFec;
     this.session = session >>> 0;
     this.fountain = new FountainEncoder(bytes, { blockSize, session: this.session });
     this.fileSize = bytes.length;
@@ -31,7 +32,8 @@ export class FileSender {
       fileName: this.fileName,
       fileHashHex: this.sha256,
       flags: this.flags,
-      body: source.body
+      body: source.body,
+      innerFec: this.innerFec
     });
   }
 
@@ -40,23 +42,25 @@ export class FileSender {
 }
 
 export class FileReceiver {
-  constructor() {
+  constructor({ innerFec = true } = {}) {
     this.session = null;
     this.decoder = null;
     this.meta = null;
     this.seenSequences = new Set();
-    this.stats = { receivedFrames: 0, duplicateFrames: 0, correctedNibbles: 0, rejectedPackets: 0, rejectionReasons: {} };
+    this.stats = { receivedFrames: 0, duplicateFrames: 0, correctedSymbols: 0, correctedNibbles: 0, rejectedPackets: 0, rejectionReasons: {} };
     this.file = null;
+    this.innerFec = innerFec;
   }
 
-  accept(encodedPacket) {
+  accept(encodedPacket, erasures = []) {
     this.stats.receivedFrames++;
-    const packet = decodePacket(encodedPacket);
+    const packet = decodePacket(encodedPacket, { innerFec: this.innerFec, erasures });
     if (!packet.ok) {
       this.stats.rejectedPackets++;
       this.stats.rejectionReasons[packet.reason] = (this.stats.rejectionReasons[packet.reason] ?? 0) + 1;
       return { ok: false, reason: packet.reason, stats: this.stats };
     }
+    this.stats.correctedSymbols += packet.corrected;
     this.stats.correctedNibbles += packet.corrected;
     if (this.session === null) {
       this.session = packet.session;

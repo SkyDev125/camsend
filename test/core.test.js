@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { decodePacket, encodePacket, PACKET_KIND } from "../src/core/protocol.js";
 import { decodeHammingByte, encodeHammingNibble, hammingDecode, hammingEncode } from "../src/core/hamming.js";
 import { FileReceiver, FileSender } from "../src/core/transfer.js";
-import { decodeOpticalFrame, renderOpticalFrame } from "../src/core/optical-frame.js";
+import { decodeOpticalFrame, layoutFor, PROFILES, renderOpticalFrame } from "../src/core/optical-frame.js";
+import { decodeGlyphFrame, GLYPH4_CODEBOOK, GLYPH6_CODEBOOK, renderGlyphFrame } from "../src/core/glyph-frame.js";
+import { reedSolomonDecode, reedSolomonEncode } from "../src/core/reed-solomon.js";
 
 const bytes = (length, seed = 7) => Uint8Array.from({ length }, (_, index) => (index * 31 + seed) & 0xff);
 
@@ -29,6 +31,52 @@ test("Hamming byte stream round-trips and detects a double-bit error", () => {
   assert.equal(hammingDecode(corrupted).ok, false);
 });
 
+test("Reed-Solomon blocks round-trip, including shortened blocks and two byte errors", () => {
+  for (const parityBytes of [8, 16]) {
+    const original = bytes(7400, parityBytes);
+    const encoded = reedSolomonEncode(original, parityBytes);
+    const clean = reedSolomonDecode(encoded, parityBytes);
+    assert.equal(clean.ok, true);
+    assert.deepEqual(clean.bytes.slice(0, original.length), original);
+    const damaged = encoded.slice(); damaged[17] ^= 0x5a; damaged[93] ^= 0xa5;
+    const repaired = reedSolomonDecode(damaged, parityBytes);
+    assert.equal(repaired.ok, true);
+    assert.equal(repaired.corrected, 2);
+    assert.deepEqual(repaired.bytes.slice(0, original.length), original);
+  }
+});
+
+test("Reed-Solomon uses known erasures beyond the unknown-error budget", () => {
+  const original = bytes(200, 91); const encoded = reedSolomonEncode(original, 16); const damaged = encoded.slice(); const erasures = [];
+  for (let index = 0; index < 12; index++) { damaged[index * 7 + 3] ^= (index + 1) * 17; erasures.push(index * 7 + 3); }
+  const repaired = reedSolomonDecode(damaged, 16, erasures);
+  assert.equal(repaired.ok, true, repaired.reason);
+  assert.equal(repaired.corrected, 12);
+  assert.deepEqual(repaired.bytes.slice(0, original.length), original);
+});
+
+test("Reed-Solomon combines known erasures with unknown errors", () => {
+  const original = bytes(200, 93); const encoded = reedSolomonEncode(original, 16); const damaged = encoded.slice(); const erasures = [];
+  for (let index = 0; index < 8; index++) { const position = index * 9 + 2; damaged[position] ^= index + 17; erasures.push(position); }
+  for (let index = 0; index < 4; index++) damaged[180 + index * 7] ^= index + 91;
+  const repaired = reedSolomonDecode(damaged, 16, erasures);
+  assert.equal(repaired.ok, true, repaired.reason);
+  assert.deepEqual(repaired.bytes.slice(0, original.length), original);
+});
+
+test("glyph alphabet has the promised minimum distance", () => {
+  for (let left = 0; left < GLYPH6_CODEBOOK.length; left++) for (let right = left + 1; right < GLYPH6_CODEBOOK.length; right++) {
+    let value = GLYPH6_CODEBOOK[left] ^ GLYPH6_CODEBOOK[right]; let distance = 0;
+    while (value) { value &= value - 1; distance++; }
+    assert.ok(distance >= 6, `${left}/${right} distance=${distance}`);
+  }
+  for (let left = 0; left < GLYPH4_CODEBOOK.length; left++) for (let right = left + 1; right < GLYPH4_CODEBOOK.length; right++) {
+    let value = GLYPH4_CODEBOOK[left] ^ GLYPH4_CODEBOOK[right]; let distance = 0;
+    while (value) { value &= value - 1; distance++; }
+    assert.ok(distance >= 8, `${left}/${right} distance=${distance}`);
+  }
+});
+
 test("packet grammar preserves metadata, body, and CRC", () => {
   const body = bytes(37);
   const packet = encodePacket({ kind: PACKET_KIND.systematic, session: 123, sequence: 4, sourceCount: 8, blockSize: 37, sourceIndex: 4, fileSize: 271, fileName: "résumé.bin", fileHashHex: "ab".repeat(32), body });
@@ -41,6 +89,16 @@ test("packet grammar preserves metadata, body, and CRC", () => {
   assert.deepEqual(decoded.body, body);
   const damaged = packet.slice(); damaged[12] ^= 0b00000011;
   assert.equal(decodePacket(damaged).ok, false);
+});
+
+test("RS packet grammar accepts a glyph-capacity padded codeword", () => {
+  const fec = { type: "rs", parityBytes: 16 };
+  const body = bytes(PROFILES.glyph6.blockSize, 51);
+  const packet = encodePacket({ kind: PACKET_KIND.systematic, session: 9, sequence: 2, sourceCount: 4, blockSize: body.length, sourceIndex: 0, fileSize: body.length, fileName: "glyph.bin", body, innerFec: fec });
+  const padded = new Uint8Array(layoutFor("glyph6").capacityBytes); padded.set(packet);
+  const decoded = decodePacket(padded, { innerFec: fec });
+  assert.equal(decoded.ok, true, decoded.reason);
+  assert.deepEqual(decoded.body, body);
 });
 
 test("file transfer reconstructs after unordered loss, repair frames, and duplicates", async () => {
@@ -72,3 +130,25 @@ for (const profile of ["robust", "dense"]) {
     assert.equal(packet.fileName, "frame.bin");
   });
 }
+
+test("glyph6 frame renderer and homography decoder round-trip a high-speed packet", async () => {
+  const fec = PROFILES.glyph6.innerFec;
+  const source = await new FileSender(bytes(100_000, 29), "glyph.bin", { blockSize: PROFILES.glyph6.blockSize, session: 44, innerFec: fec }).prepare();
+  const encoded = source.packet(0);
+  const frame = renderGlyphFrame(encoded, "glyph6", { width: 1728 });
+  const decoded = decodeGlyphFrame(frame.rgba, frame.width, frame.height, "glyph6");
+  assert.equal(decoded.ok, true, decoded.reason);
+  assert.deepEqual(decoded.encodedPacket.slice(0, encoded.length), encoded);
+  assert.equal(decodePacket(decoded.encodedPacket, { innerFec: fec }).ok, true);
+});
+
+test("glyph4 wide frame renderer and homography decoder round-trip a tolerant packet", async () => {
+  const fec = PROFILES.glyph4.innerFec;
+  const source = await new FileSender(bytes(100_000, 29), "glyph-wide.bin", { blockSize: PROFILES.glyph4.blockSize, session: 45, innerFec: fec }).prepare();
+  const encoded = source.packet(0);
+  const frame = renderGlyphFrame(encoded, "glyph4", { width: 1728 });
+  const decoded = decodeGlyphFrame(frame.rgba, frame.width, frame.height, "glyph4");
+  assert.equal(decoded.ok, true, decoded.reason);
+  assert.deepEqual(decoded.encodedPacket.slice(0, encoded.length), encoded);
+  assert.equal(decodePacket(decoded.encodedPacket, { innerFec: fec, erasures: decoded.erasures }).ok, true);
+});

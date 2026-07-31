@@ -1,12 +1,13 @@
 # Camsend
 
-Offline optical file transfer between screens and cameras. The browser and Android endpoints use the same packet grammar, Hamming protection, deterministic fountain recovery, marker geometry, calibration strip, and SHA-256 verification.
+Offline optical file transfer between screens and cameras. The browser and Android endpoints use the same packet grammar, profile-specific inner protection, deterministic fountain recovery, marker geometry, calibration strip, and SHA-256 verification.
 
 ## Current build
 
 - Offline web/PWA endpoint: `web/`
 - Shared codec and optical renderer: `src/core/`
 - Deterministic simulator and benchmark: `simulator/`
+- Experimental high-speed glyph profiles: `glyph4` (tolerant) and `glyph6` (stationary/high-density)
 - Native Android shell with camera permission, fullscreen, keep-awake/brightness controls, and native file saving: `android/`
 - Debug APK after the Android build: `artifacts/camsend-debug.apk`
 
@@ -27,9 +28,10 @@ Open `http://localhost:4173/web/` in a secure browser context or serve the `web/
 ```powershell
 npm test
 npm run benchmark
+node simulator/high-speed-benchmark.mjs
 ```
 
-The benchmark reports raw optical bitrate, recovered encoded-payload rate, and verified original-file goodput separately. The checked-in baseline is [benchmarks/baseline-2026-07-31.json](benchmarks/baseline-2026-07-31.json). The current VM has no physical camera/display, so these are deterministic simulation results rather than hardware claims.
+The benchmark reports raw optical bitrate, nominal encoded-payload bitrate, recovered encoded-payload bitrate, and verified original-file goodput separately. Bitrate fields are explicitly labelled in bits/s; byte-rate fields use bytes/s. For reference, 190 kb/s is only 23.75 kB/s decimal, and the original dense baseline measures 24,000–26,667 bytes/s (192–213 kb/s). The high-speed glyph6 candidate reaches 136,364 verified bytes/s at 30 nominal fps and 272,727 verified bytes/s at 60 nominal fps on the deterministic 100 KB fixture with 8% frame loss and 5% duplicates. Those are simulator results for a geometry-neutral stationary fixture, not physical-device claims. The [Decimen optical-transfer PoC](https://github.com/bashalarmistalt/decimen-optical-transfer) reports 129.2 KiB/s in its README screenshot and approximately 128–186 KiB/s in its parent experiment, so that is the comparison floor—not a ceiling. The checked-in baseline is [benchmarks/baseline-2026-07-31.json](benchmarks/baseline-2026-07-31.json). The current VM has no physical camera/display.
 
 ## Build the Android APK
 
@@ -50,5 +52,5 @@ The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. The b
 - [Wayfinder map](docs/wayfinding/optical-file-transfer-map.md)
 - [Diagnostic export and hardware-test workflow](docs/tickets/05-diagnostics-and-device-fixtures.md)
 
-Version one deliberately starts with a calibrated grayscale tile stream: a robust four-level profile and a dense sixteen-level profile. Four saturated corner markers carry geometry only. Each frame contains a Hamming-protected packet; source and repair packets are combined by a deterministic sparse-XOR fountain decoder. A transfer is successful only after exact length and SHA-256 verification.
+The compatibility path remains a calibrated grayscale tile stream: a robust four-level profile and a dense sixteen-level profile. The measured high-speed path adds a 4×4 binary glyph alphabet, 6-bit symbols, phase search, RS(255,239), and the same fountain/file verification layer. Four saturated corner markers carry geometry only. A transfer is successful only after exact length and SHA-256 verification. The Android artifact currently packages this shared web decoder in a native shell; native CameraX/GPU decoding remains an explicit next milestone rather than an unstated capability.
 

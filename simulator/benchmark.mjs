@@ -19,7 +19,10 @@ const run = async ({ profile = "robust", bytes = 8_000, seed = 7, frameLoss = 0.
     if ((sequence * 2654435761 + seed) % 1000 < duplicate * 1000) receiver.accept(decoded.encodedPacket);
   }
   const verified = await receiver.verify(); const decoderCpuSeconds = (performance.now() - started) / 1000; const frameRate = 30; const simulatedWallClockSeconds = Math.max(1 / frameRate, (lastSequence + 1) / frameRate);
-  return { profile, seed, bytes, verified: verified.ok, frames: receiver.stats.receivedFrames, uniqueFrames: unique, duplicateFrames: receiver.stats.duplicateFrames + duplicates, rejectedFrames: rejected, rank: receiver.decoder?.rank ?? 0, sourceCount: sender.sourceCount, elapsedSeconds: simulatedWallClockSeconds, decoderCpuSeconds, rawOpticalBitrate: PROFILES[profile].cols * PROFILES[profile].rows * PROFILES[profile].bitsPerCell * frameRate, recoveredPayloadRate: sender.blockSize * 8 * unique / Math.max(simulatedWallClockSeconds, 1e-9), verifiedGoodput: verified.ok ? bytes / Math.max(simulatedWallClockSeconds, 1e-9) : 0, lastDiagnostics };
+  const rawOpticalBitrate = PROFILES[profile].cols * PROFILES[profile].rows * PROFILES[profile].bitsPerCell * frameRate;
+  const recoveredPayloadBitrate = sender.blockSize * 8 * unique / Math.max(simulatedWallClockSeconds, 1e-9);
+  const verifiedGoodputBytesPerSecond = verified.ok ? bytes / Math.max(simulatedWallClockSeconds, 1e-9) : 0;
+  return { profile, seed, bytes, verified: verified.ok, frames: receiver.stats.receivedFrames, uniqueFrames: unique, duplicateFrames: receiver.stats.duplicateFrames + duplicates, rejectedFrames: rejected, rank: receiver.decoder?.rank ?? 0, sourceCount: sender.sourceCount, elapsedSeconds: simulatedWallClockSeconds, decoderCpuSeconds, rawOpticalBitrate, rawOpticalBitrateBitsPerSecond: rawOpticalBitrate, recoveredPayloadBitrate, recoveredPayloadBitrateBitsPerSecond: recoveredPayloadBitrate, verifiedGoodputBytesPerSecond, verifiedGoodputBitrate: verifiedGoodputBytesPerSecond * 8, verifiedGoodputBitsPerSecond: verifiedGoodputBytesPerSecond * 8, lastDiagnostics };
 };
 
 const main = async () => {

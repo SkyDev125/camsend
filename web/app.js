@@ -1,11 +1,14 @@
 import { FileReceiver, FileSender } from "./generated/core/transfer.js";
+import { decodeGlyphFrame, renderGlyphFrame } from "./generated/core/glyph-frame.js";
 import { decodeOpticalFrame, PROFILES, renderOpticalFrame } from "./generated/core/optical-frame.js";
 
 const $ = (id) => document.getElementById(id);
-const state = { mode: "send", sender: null, senderFrame: 0, senderStarted: 0, senderTimer: null, stream: null, receiver: null, receiveStarted: 0, receiveLoop: 0, diagnostics: {}, lastCameraFrame: 0, cameraFrames: 0, profile: "robust", verified: false };
+const state = { mode: "send", sender: null, senderFrame: 0, senderStarted: 0, senderTimer: null, stream: null, receiver: null, receiveStarted: 0, receiveLoop: 0, diagnostics: {}, lastCameraFrame: 0, cameraFrames: 0, profile: "robust", verified: false, verifying: false };
 
-const formatBytes = (value) => { if (value < 1024) return `${value} B`; if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`; return `${(value / 1024 ** 2).toFixed(2)} MB`; };
+const formatBytes = (value) => { if (value < 1024) return `${value} B`; if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KiB`; return `${(value / 1024 ** 2).toFixed(2)} MiB`; };
 const formatRate = (value) => `${formatBytes(Math.max(0, value))}/s`;
+const profileUsesGlyphs = (profile) => profile === "glyph4" || profile === "glyph6";
+const profileFec = (profile) => PROFILES[profile].innerFec ?? true;
 const nativeBridge = () => globalThis.CamsendNative ?? null;
 const bytesToBase64 = (bytes) => { let binary = ""; const chunk = 0x8000; for (let index = 0; index < bytes.length; index += chunk) binary += String.fromCharCode(...bytes.subarray(index, Math.min(bytes.length, index + chunk))); return btoa(binary); };
 const setStatus = (id, text) => $(id).textContent = text;
@@ -42,17 +45,19 @@ const stopSender = async () => {
 const sendTick = () => {
   if (!state.sender) return;
   const profile = $("send-profile").value; const canvas = $("send-canvas");
-  const frame = renderOpticalFrame(state.sender.packet(state.senderFrame++), profile, { width: PROFILES[profile].cols * 8 });
+  const frame = profileUsesGlyphs(profile)
+    ? renderGlyphFrame(state.sender.packet(state.senderFrame++), profile, { width: 1728 })
+    : renderOpticalFrame(state.sender.packet(state.senderFrame++), profile, { width: PROFILES[profile].cols * 8 });
   canvas.width = frame.width; canvas.height = frame.height; canvas.getContext("2d", { alpha: false }).putImageData(new ImageData(frame.rgba, frame.width, frame.height), 0, 0);
   const elapsed = Math.max(0.001, (performance.now() - state.senderStarted) / 1000); const cadence = Number($("send-cadence").value);
-  renderMetrics("send-metrics", { "frames shown": state.senderFrame.toLocaleString(), "estimated stream": formatRate(state.senderFrame * state.sender.blockSize / elapsed), "source blocks": state.sender.sourceCount.toLocaleString(), "profile": profile });
+  renderMetrics("send-metrics", { "frames shown": state.senderFrame.toLocaleString(), "estimated payload (KiB/s)": formatRate(state.senderFrame * state.sender.blockSize / elapsed), "source blocks": state.sender.sourceCount.toLocaleString(), "profile": profile });
   state.senderTimer = setTimeout(sendTick, 1000 / cadence);
 };
 
 const startSender = async () => {
   const file = $("file-input").files[0]; if (!file) return;
   const bytes = new Uint8Array(await file.arrayBuffer()); const profile = $("send-profile").value;
-  state.sender = await new FileSender(bytes, file.name, { blockSize: PROFILES[profile].blockSize, flags: profile === "dense" ? 1 : 0 }).prepare();
+  state.profile = profile; state.sender = await new FileSender(bytes, file.name, { blockSize: PROFILES[profile].blockSize, flags: profile === "dense" ? 1 : 0, innerFec: profileFec(profile) }).prepare();
   state.senderFrame = 0; state.senderStarted = performance.now(); setStatus("sender-state", "transmitting"); setVisible($("send-stage"), true); $("send-start").textContent = "Transmitting";
   nativeBridge()?.setKeepScreenOn?.(true); nativeBridge()?.setScreenBrightness?.(100);
   const canvas = $("send-canvas");
@@ -60,9 +65,21 @@ const startSender = async () => {
   sendTick();
 };
 
+const scheduleReceive = () => {
+  const video = $("camera-video");
+  state.receiveLoop = typeof video.requestVideoFrameCallback === "function"
+    ? video.requestVideoFrameCallback(() => receiveTick())
+    : requestAnimationFrame(receiveTick);
+};
+
 const stopCamera = () => {
-  if (state.receiveLoop) cancelAnimationFrame(state.receiveLoop); state.receiveLoop = 0;
-  state.stream?.getTracks().forEach((track) => track.stop()); state.stream = null; $("camera-video").srcObject = null; $("camera-start").disabled = false; $("camera-stop").disabled = true; setStatus("receiver-state", "camera idle");
+  const video = $("camera-video");
+  if (state.receiveLoop) {
+    if (typeof video.cancelVideoFrameCallback === "function") video.cancelVideoFrameCallback(state.receiveLoop);
+    else cancelAnimationFrame(state.receiveLoop);
+  }
+  state.receiveLoop = 0; state.verifying = false;
+  state.stream?.getTracks().forEach((track) => track.stop()); state.stream = null; video.srcObject = null; nativeBridge()?.setKeepScreenOn?.(false); $("camera-start").disabled = false; $("camera-stop").disabled = true; setStatus("receiver-state", "camera idle");
 };
 
 const cameraConstraints = () => ({ audio: false, video: { deviceId: $("camera-select").value ? { exact: $("camera-select").value } : undefined, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30, max: 60 } } });
@@ -76,40 +93,44 @@ const populateCameras = async () => {
 const receiveTick = () => {
   if (!state.stream) return;
   const video = $("camera-video"); const canvas = $("camera-canvas");
-  if (video.readyState < 2 || !video.videoWidth) { state.receiveLoop = requestAnimationFrame(receiveTick); return; }
-  if (video.currentTime === state.lastCameraFrame) { state.receiveLoop = requestAnimationFrame(receiveTick); return; }
+  if (video.readyState < 2 || !video.videoWidth) { scheduleReceive(); return; }
+  if (video.currentTime === state.lastCameraFrame) { scheduleReceive(); return; }
   state.lastCameraFrame = video.currentTime; state.cameraFrames++;
-  const scale = Math.min(1, 960 / video.videoWidth); canvas.width = Math.max(1, Math.round(video.videoWidth * scale)); canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+  const profile = $("receive-profile").value; const targetWidth = profileUsesGlyphs(profile) ? 1440 : 960;
+  const scale = Math.min(1, targetWidth / video.videoWidth); canvas.width = Math.max(1, Math.round(video.videoWidth * scale)); canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
   const context = canvas.getContext("2d", { willReadFrequently: true }); context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const profile = $("receive-profile").value; const decoded = decodeOpticalFrame(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height, profile);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const decoded = profileUsesGlyphs(profile) ? decodeGlyphFrame(pixels, canvas.width, canvas.height, profile) : decodeOpticalFrame(pixels, canvas.width, canvas.height, profile);
   if (decoded.ok) {
-    state.diagnostics = { ...state.diagnostics, ...decoded.diagnostics }; const result = state.receiver.accept(decoded.encodedPacket); updateDiagnostics(decoded.diagnostics); setStatus("receiver-state", result.complete ? "verifying" : "receiving");
-    const elapsed = Math.max(.001, (performance.now() - state.receiveStarted) / 1000); renderMetrics("receive-metrics", { progress: `${(state.receiver.progress * 100).toFixed(1)}%`, "camera frames": state.cameraFrames.toLocaleString(), "unique packets": state.receiver.seenSequences.size.toLocaleString(), "verified goodput": formatRate(result.complete ? (state.receiver.file?.length ?? 0) / elapsed : 0), rejected: state.receiver.stats.rejectedPackets.toLocaleString() });
-    if (result.complete) finishReceive(elapsed);
+    state.diagnostics = { ...state.diagnostics, ...decoded.diagnostics }; const result = state.receiver.accept(decoded.encodedPacket, decoded.erasures); updateDiagnostics(decoded.diagnostics); setStatus("receiver-state", result.complete ? "verifying" : "receiving");
+    const elapsed = Math.max(.001, (performance.now() - state.receiveStarted) / 1000); renderMetrics("receive-metrics", { progress: `${(state.receiver.progress * 100).toFixed(1)}%`, "camera frames": state.cameraFrames.toLocaleString(), "unique packets": state.receiver.seenSequences.size.toLocaleString(), "verified goodput (KiB/s)": formatRate(result.complete ? (state.receiver.file?.length ?? 0) / elapsed : 0), rejected: state.receiver.stats.rejectedPackets.toLocaleString() });
+    if (result.complete && !state.verifying) finishReceive(elapsed);
   }
-  state.receiveLoop = requestAnimationFrame(receiveTick);
+  scheduleReceive();
 };
 
 const finishReceive = async (elapsed) => {
-  if (state.verified) return;
+  if (state.verified || state.verifying) return;
   if (!state.receiver.file) return;
-  const verified = await state.receiver.verify(); if (!verified.ok) { setStatus("receiver-state", "hash mismatch"); return; }
+  state.verifying = true;
+  const verified = await state.receiver.verify(); if (!verified.ok) { state.verifying = false; setStatus("receiver-state", "hash mismatch"); return; }
   state.verified = true;
-  state.diagnostics.verifiedGoodput = state.receiver.file.length / Math.max(.001, elapsed); $("diag-goodput").textContent = formatRate(state.diagnostics.verifiedGoodput); setStatus("receiver-state", "verified");
+  state.diagnostics.verifiedGoodputBytesPerSecond = state.receiver.file.length / Math.max(.001, elapsed); state.diagnostics.verifiedGoodputBitsPerSecond = state.diagnostics.verifiedGoodputBytesPerSecond * 8; $("diag-goodput").textContent = formatRate(state.diagnostics.verifiedGoodputBytesPerSecond); setStatus("receiver-state", "verified");
   const blob = new Blob([state.receiver.file]); const url = URL.createObjectURL(blob); const download = $("download-file"); const fileName = state.receiver.meta.fileName || "received.bin"; download.href = url; download.download = fileName; download.onclick = () => { const bridge = nativeBridge(); if (bridge?.saveFile) { try { if (bridge.saveFile(fileName, bytesToBase64(state.receiver.file))) { setStatus("receiver-state", "saved locally"); return false; } } catch (error) { state.diagnostics.nativeSaveError = String(error); } } setTimeout(() => URL.revokeObjectURL(url), 1000); return true; }; setVisible(download, true);
 };
 
 const startCamera = async () => {
   if (!navigator.mediaDevices?.getUserMedia) { setStatus("receiver-state", "camera API unavailable"); return; }
-  stopCamera(); state.receiver = new FileReceiver(); state.receiveStarted = performance.now(); state.cameraFrames = 0; state.lastCameraFrame = 0; state.verified = false; nativeBridge()?.setKeepScreenOn?.(true); $("download-file").removeAttribute("href"); setVisible($("download-file"), false);
+  stopCamera(); const profile = $("receive-profile").value; state.profile = profile; state.receiver = new FileReceiver({ innerFec: profileFec(profile) }); state.receiveStarted = performance.now(); state.cameraFrames = 0; state.lastCameraFrame = 0; state.verified = false; nativeBridge()?.setKeepScreenOn?.(true); $("download-file").removeAttribute("href"); setVisible($("download-file"), false);
   try { state.stream = await navigator.mediaDevices.getUserMedia(cameraConstraints()); $("camera-video").srcObject = state.stream; await $("camera-video").play(); await populateCameras(); $("camera-start").disabled = true; $("camera-stop").disabled = false; setStatus("receiver-state", "looking for sender"); receiveTick(); } catch (error) { setStatus("receiver-state", `${error.name || "camera"} — permission needed`); }
 };
 
 $("file-input").addEventListener("change", () => { const file = $("file-input").files[0]; $("file-label").textContent = file?.name || "Choose a local file"; $("file-meta").textContent = file ? `${formatBytes(file.size)} · stays local` : "Nothing leaves this device."; $("send-start").disabled = !file; });
 $("send-start").addEventListener("click", startSender); $("send-stop").addEventListener("click", stopSender); $("camera-start").addEventListener("click", startCamera); $("camera-stop").addEventListener("click", stopCamera); $("camera-select").addEventListener("change", startCamera);
 $("send-profile").addEventListener("change", () => { if (state.sender) stopSender(); });
+$("receive-profile").addEventListener("change", () => { if (state.stream) startCamera(); });
 document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => switchMode(tab.dataset.mode)));
-$("export-diagnostics").addEventListener("click", () => { let nativeCapabilities = null; try { nativeCapabilities = JSON.parse(nativeBridge()?.capabilities?.() || "null"); } catch {} const payload = { schema: 1, exportedAt: new Date().toISOString(), userAgent: navigator.userAgent, mode: state.mode, cameraFrames: state.cameraFrames, nativeCapabilities, diagnostics: state.diagnostics, receiverStats: state.receiver?.stats ?? null }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `camsend-diagnostics-${Date.now()}.json`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 500); });
+$("export-diagnostics").addEventListener("click", () => { let nativeCapabilities = null; try { nativeCapabilities = JSON.parse(nativeBridge()?.capabilities?.() || "null"); } catch {} const payload = { schema: 1, exportedAt: new Date().toISOString(), userAgent: navigator.userAgent, mode: state.mode, profile: state.profile, cameraFrames: state.cameraFrames, nativeCapabilities, diagnostics: state.diagnostics, receiverStats: state.receiver?.stats ?? null }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = `camsend-diagnostics-${Date.now()}.json`; anchor.click(); setTimeout(() => URL.revokeObjectURL(url), 500); });
 window.addEventListener("beforeunload", stopCamera);
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("./service-worker.js").catch(() => {});
 switchMode("send");

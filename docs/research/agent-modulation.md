@@ -74,6 +74,10 @@ Keep the accepted ADR-0001 payload as the shipping V1: a visible projective tile
 
 The ADR’s accepted robust/dense grayscale modes remain the compatibility path. C4 and H4G16 are hypotheses to falsify with the benchmark, not a protocol change by assertion.
 
+### Measured glyph amendment
+
+The first glyph experiment is now implemented, not merely benchmark-only: `glyph4` uses a 16-symbol 4×4 binary alphabet with minimum Hamming distance 8, while `glyph6` uses a 64-symbol alphabet with minimum distance 6. Both use a precomputed nearest-symbol table, phase search, RS(255,239), and the shared fountain/file verifier. Glyph6 reaches 136,364 verified bytes/s on the deterministic 100 KB loss/duplicate fixture, so it replaces H4G16 as the active high-speed candidate. It remains a stationary mode until physical and rolling-shutter fixtures pass the reliability gates; glyph4 is the measured fallback candidate for small motion and defocus.
+
 ### Common fixture and receiver outputs
 
 All candidates must use the same display area, quiet margin, fiducials, projective rectification, tile pitch, frame header, sequence semantics, packet CRC, outer recovery, and file SHA-256 acceptance. Only the payload alphabet changes. Each tile decoder should emit:

@@ -25,9 +25,13 @@ These are related but not interchangeable names:
 
 The project’s own documentation says the design is experimental, not a standards document. Its strongest file-transfer result is therefore an open-source engineering benchmark rather than a peer-reviewed independent evaluation.
 
-### Decim and Decimen
+### Decimen optical transfer
 
-I found no authoritative primary paper, project page, source repository, or benchmark identifying **Decim** or **Decimen** as an optical screen/camera file-transfer system. Public results under those spellings resolve to unrelated messaging, photography, semiconductor, or patent material. I therefore do not merge either name into COBRA, Cimbar, or another system. The name is probably a typo, an internal project codename, or a citation variant; the ticket should retain it as an unresolved alias until a manuscript, repository, or URL is supplied.
+The exact public implementation is [bashalarmistalt/decimen-optical-transfer](https://github.com/bashalarmistalt/decimen-optical-transfer). Its README describes a fountain-coded QR proof of concept and reports a screenshot at **129.2 KiB/s**. It also states that a parent experiment reached approximately **128 KiB/s handheld** and **186 KiB/s propped**, using denser frames, stacked codes, a 120 Hz sender, and a 60 fps camera path. Those parent-experiment details are not fully reproduced in the public repository, so the numbers are credible comparison points rather than independently reproducible baselines.
+
+The public PoC sends one QR per frame. Sender settings include QR v27 (about 1,465 total bytes/frame) or QR v40 (about 2,953 total bytes/frame), 24–60 fps, and repeated display refreshes. The receiver requests 60 fps, uses `requestVideoFrameCallback`, and decodes through one to three `zxing-wasm` workers. A robust-soliton LT fountain adds approximately 15% overhead according to the README. The protocol uses a small FNV-1a frame hash in the public PoC, while file-level SHA-256 work is in a draft PR rather than the default branch.
+
+**Bottlenecks and what Camsend changes.** One QR limits spatial parallelism, QR generation/ZXing cost is concentrated in a large binary symbol, and the parent stacked-code count is unspecified. Camsend's glyph candidate instead samples independently recoverable cells through one projective geometry, uses a fixed minimum-distance codebook, precomputed nearest-symbol tables, phase search, algebraic RS(255,239), and SHA-256 file acceptance. This is a genuine measured architectural challenger: the deterministic glyph6 simulator reaches 136,364 verified bytes/s on a 100 KB, 30 fps, 8% loss/5% duplicate fixture, while the original Camsend dense profile was only 24,000–26,667 bytes/s. The glyph result is not a physical-device claim; rotation, blur, and rolling-shutter fixtures remain hardening gates.
 
 ### COBRA and RainBar
 

@@ -13,6 +13,10 @@ Use a visible screen-wide tile stream. Four saturated corner fiducials define a 
 
 The shared protocol is specified by the JavaScript reference implementation and golden vectors. The browser and native Android host currently run those same assets; any future independent native codec must match the vectors. Camera processing exposes a low-cost reference path first; WebAssembly/SIMD/GPU and Camera2 controls are optional accelerators.
 
+## Performance amendment
+
+The Decimen comparison showed that the original dense path was not an adequate throughput target. The implementation now includes a measured high-speed extension: binary 4×4 glyphs at 4 or 6 bits/cell, a small grid-phase search, confidence-derived erasures, and systematic RS(255,239). Glyph4 uses a wider 112 × 63 lattice as the higher-margin fallback; glyph6 uses 144 × 81 for a compatible stationary screen-camera pair. Robust/dense retain Hamming(8,4), while glyph packets use algebraic RS. All profiles retain the same session/sequence grammar, sparse-XOR fountain, CRC, and SHA-256 acceptance.
+
 ## Alternatives rejected
 
 - Animated QR: retained only as a baseline fixture; too much finder/format overhead for the target payload.

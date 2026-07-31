@@ -36,8 +36,8 @@
           <span><strong id="file-label">Choose a local file</strong><small id="file-meta">Nothing leaves this device.</small></span>
         </label>
         <div class="controls-grid">
-          <label>Optical profile<select id="send-profile"><option value="robust">Robust · 2-bit calibrated</option><option value="dense">Dense · 4-bit calibrated</option></select></label>
-          <label>Frame cadence<select id="send-cadence"><option value="24">24 fps</option><option value="30" selected>30 fps</option><option value="45">45 fps</option></select></label>
+          <label>Optical profile<select id="send-profile"><option value="robust">Robust · 2-bit calibrated</option><option value="dense">Dense · 4-bit calibrated</option><option value="glyph4">Tolerant glyph · 4-bit</option><option value="glyph6">High-speed glyph · 6-bit stationary</option></select></label>
+          <label>Frame cadence<select id="send-cadence"><option value="24">24 fps</option><option value="30" selected>30 fps</option><option value="45">45 fps</option><option value="60">60 fps</option></select></label>
         </div>
         <button id="send-start" class="primary" disabled>Prepare transfer</button>
         <div id="send-metrics" class="metrics hidden"></div>
@@ -50,7 +50,7 @@
           <span id="receiver-state" class="status-dot">camera idle</span>
         </div>
         <div class="controls-grid">
-          <label>Optical profile<select id="receive-profile"><option value="robust">Robust · 2-bit calibrated</option><option value="dense">Dense · 4-bit calibrated</option></select></label>
+          <label>Optical profile<select id="receive-profile"><option value="robust">Robust · 2-bit calibrated</option><option value="dense">Dense · 4-bit calibrated</option><option value="glyph4">Tolerant glyph · 4-bit</option><option value="glyph6">High-speed glyph · 6-bit stationary</option></select></label>
           <label>Camera<select id="camera-select"><option value="">Choose after camera permission</option></select></label>
         </div>
         <div class="camera-stage"><video id="camera-video" playsinline muted></video><canvas id="camera-canvas" class="hidden"></canvas><div id="camera-guide" class="camera-guide"><span>Start the camera, then fill the guide with the sender screen.</span></div></div>

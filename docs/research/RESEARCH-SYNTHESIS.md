@@ -2,6 +2,12 @@
 
 Research snapshot: 2026-07-31. This note records the evidence used to choose the first implementation. Sources are primary papers, standards, official platform documentation, and first-party implementations where available.
 
+## Performance recovery decision
+
+The public [Decimen optical-transfer PoC](https://github.com/bashalarmistalt/decimen-optical-transfer) changed the throughput baseline after the original V1 map was written. Its README reports a 129.2 KiB/s screenshot and approximately 128–186 KiB/s in a parent experiment. The public PoC uses one QR per frame, ZXing workers, 24–60 fps sender settings, and a robust-soliton LT stream; the parent experiment's stacked-code configuration is not independently specified. Camsend's original dense profile measured only 24,000–26,667 bytes/s, so it was not competitive.
+
+An experimental high-density candidate was therefore implemented and benchmarked rather than dismissed as a barcode variant. It uses an independently recoverable 4×4 binary glyph per cell, a fixed measured-distance codebook, per-frame projective geometry and radiometric calibration, a small phase search, RS(255,239) inner blocks, sparse-XOR fountain recovery, and SHA-256 file acceptance. The glyph6 profile carries 6 raw bits/cell and achieved **136,364 verified bytes/s** on a 100 KB deterministic fixture at 30 nominal frames/s with 8% frame loss and 5% duplicates. This is a simulator result; the same run reports decoder CPU separately and is not a hardware claim. A glyph4 profile trades capacity for a minimum-distance-8 alphabet and is the planned motion/defocus fallback.
+
 ## What the literature says
 
 - LCD/camera links are not ordinary barcode scans. Perspective changes the sampling pitch across the frame, blur mixes neighbouring cells, ambient light adds a large DC component, and rolling shutter can sample different display states by row. PixNet explicitly models perspective and blur and reports up to 12 Mb/s with a large LCD and commodity cameras at 10 m, but its evaluation uses a specialized OFDM-style link and is not a direct promise for handheld browser cameras. [PixNet paper](https://people.csail.mit.edu/nabeel/pixnet-mobicom10.pdf), [capacity under perspective](https://www.sciencedirect.com/science/article/abs/pii/S1574119214001849)
@@ -30,6 +36,10 @@ Research snapshot: 2026-07-31. This note records the evidence used to choose the
 - The simulator emits a confusion matrix and confidence distribution for each candidate symbol mode. Candidate changes are retained only when verified goodput or reliability improves under the same seeded impairment suite.
 - The protocol has a robust fallback (2-bit cells) and a dense candidate (4-bit cells) behind one frame grammar, making the 16-level idea measurable instead of assumed.
 
+## Performance amendment to the V1 decision
+
+The original Hamming-only grayscale path remains the compatibility fallback. The measured high-density path adds a binary glyph alphabet whose codewords are selected by Hamming separation, a precomputed nearest-symbol table, a frame-level grid-phase search, confidence-derived RS erasures, and algebraic RS(255,239) recovery. The browser and Android package use the same packet/codec core. Glyph6 is explicitly stationary until rolling-shutter-aware timing and physical-device fixtures show that its extra density is safe. Glyph4 is now the wider 112 × 63 higher-margin mode; it completed the mild rotation/perspective/exposure/noise fixture with zero rejected frames, while the denser 144 × 81 geometry remains the speed mode.
+
 ## Explicitly rejected for Version 1
 
 - Animated QR: useful as a baseline fixture, but its finder/format overhead and single-code capacity do not exploit an independently sampled high-density lattice.
@@ -37,4 +47,3 @@ Research snapshot: 2026-07-31. This note records the evidence used to choose the
 - Full DNN/StegaStamp decoding: too costly and difficult to make deterministic/offline across browser and Android for the first working build.
 - Full RaptorQ: standard and promising, but a second independent implementation before measuring V1's sparse-XOR failure modes would add complexity without evidence of a bottleneck.
 - Dedicated OFDM/rolling-shutter exploitation: promising on controlled hardware, but fragile on ordinary browser webcams and requires more camera timing control than web APIs guarantee.
-
