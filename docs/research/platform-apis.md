@@ -6,5 +6,4 @@ The web implementation therefore has a Canvas/ImageData reference path, a worker
 
 Android CameraX `ImageAnalysis` gives CPU-accessible frames and supports `STRATEGY_KEEP_ONLY_LATEST`, which is appropriate for low-latency optical decoding; Camera2 exposes AE lock and related controls for a native stationary mode. [CameraX analysis](https://developer.android.com/media/camera/camerax/analyze), [CameraX API](https://developer.android.com/reference/androidx/camera/core/ImageAnalysis), [Camera2 CaptureRequest](https://developer.android.com/reference/android/hardware/camera2/CaptureRequest)
 
-The shared boundary is a language-neutral frame grammar plus golden vectors. V1 contains a TypeScript reference core and a Kotlin adapter/reference implementation; any future Rust/WASM/native core must pass the same vectors.
-
+The shared boundary is a language-neutral frame grammar plus golden vectors. V1 contains a JavaScript reference core and a native Java Android host that packages and runs the same offline assets; any future Rust/WASM/native core must pass the same vectors.

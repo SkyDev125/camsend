@@ -220,11 +220,19 @@ public final class MainActivity extends Activity {
             try {
                 pendingFile = Base64.decode(encodedBytes, Base64.DEFAULT);
                 pendingFileName = safeFileName(fileName);
-                Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("application/octet-stream");
-                intent.putExtra(Intent.EXTRA_TITLE, pendingFileName);
-                startActivityForResult(intent, SAVE_FILE);
+                runOnUiThread(() -> {
+                    try {
+                        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType("application/octet-stream");
+                        intent.putExtra(Intent.EXTRA_TITLE, pendingFileName);
+                        startActivityForResult(intent, SAVE_FILE);
+                    } catch (ActivityNotFoundException error) {
+                        Log.e(TAG, "No document provider is available", error);
+                        pendingFile = null;
+                        pendingFileName = null;
+                    }
+                });
                 return true;
             } catch (RuntimeException error) {
                 Log.e(TAG, "Could not prepare native save", error);
