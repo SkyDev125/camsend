@@ -9,8 +9,8 @@
       "bytes": 8000,
       "verified": true,
       "rawOpticalBitrate": 423360,
-      "verifiedGoodputBytesPerSecondRange": [11329.95, 17984.85],
-      "recoveredPayloadBytesPerSecondRange": [214634.59, 248622.59]
+      "verifiedGoodputBytesPerSecondRange": [6153.85, 8275.86],
+      "recoveredPayloadBytesPerSecondRange": [114405.52, 116578.46]
     },
     {
       "profile": "dense",
@@ -18,8 +18,8 @@
       "bytes": 8000,
       "verified": true,
       "rawOpticalBitrate": 1399680,
-      "verifiedGoodputBytesPerSecondRange": [31290.08, 35085.52],
-      "recoveredPayloadBytesPerSecondRange": [384492.48, 431130.85]
+      "verifiedGoodputBytesPerSecondRange": [24000, 26666.67],
+      "recoveredPayloadBytesPerSecondRange": [294912, 327680]
     }
   ],
   "caveat": "Perspective and motion cases are implemented by simulator/optical-sim.mjs but are not represented by this clean baseline; they remain the next decoder-hardening gate."

@@ -5,4 +5,4 @@ The benchmark must report decoded file bytes only after exact reconstruction and
 The reproducible pipeline is: render a frame, apply seeded geometry/blur/exposure/colour/noise/rolling-shutter/obstruction effects, optionally drop or duplicate the frame, decode with the same reference decoder, then run fountain recovery and SHA-256 verification. Each run emits a JSON report with seed, mode, grid, frame count, unique/duplicate/rejected frames, correction counts, decode timings, confidence, and throughput.
 
 Retention gates compare candidate modes on the same fixture matrix. A change is retained only if it improves verified goodput without a statistically meaningful reliability regression, or materially reduces decoder cost/compatibility risk. Real-camera exports use the same schema and never include payload bytes unless an explicit recording option is enabled.
-
+The benchmark's primary elapsed time is deterministic simulated display time (`frame count / nominal frame rate`); decoder CPU time is reported separately. This prevents machine speed from changing the headline transfer comparison while still exposing decode cost.
